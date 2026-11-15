@@ -96,6 +96,17 @@ export default function ShellLayout({ nav, bottomNav, tagline, roleLabel, collap
             <span className="font-display font-bold">مترو القاهرة الكبرى</span>
           </div>
           <div className="flex items-center gap-2" style={{ marginInlineStart: 'auto' }}>
+            {/* mobile-only logout (the sidebar hosting the desktop logout is hidden below md) */}
+            {!sidebarAlways && (
+              <button
+                onClick={onLogout}
+                aria-label="تسجيل الخروج"
+                title="تسجيل الخروج"
+                className="grid h-10 w-10 place-items-center rounded-md border bg-card text-muted-foreground transition hover:text-accent md:hidden"
+              >
+                <LogOut className="h-[18px] w-[18px]" />
+              </button>
+            )}
             {bellTo && (
               <Link to={bellTo} aria-label="التنبيهات" className="relative grid h-10 w-10 place-items-center rounded-md border bg-card text-muted-foreground hover:text-foreground">
                 <Bell className="h-[18px] w-[18px]" />
