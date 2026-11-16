@@ -1,0 +1,34 @@
+{
+  "intro": {
+    "dur": 5.4,
+    "loadMs": 458
+  },
+  "home": {
+    "dur": 7.4,
+    "loadMs": 0
+  },
+  "login": {
+    "dur": 8.4,
+    "loadMs": 2234
+  },
+  "trip": {
+    "dur": 15.4,
+    "loadMs": 3542
+  },
+  "services": {
+    "dur": 11,
+    "loadMs": 7352
+  },
+  "admin": {
+    "dur": 8.4,
+    "loadMs": 696
+  },
+  "future": {
+    "dur": 4.4,
+    "loadMs": 1086
+  },
+  "closing": {
+    "dur": 2.4,
+    "loadMs": 443
+  }
+}
