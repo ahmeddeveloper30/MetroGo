@@ -1,0 +1,14 @@
+{
+  "cookies": [],
+  "origins": [
+    {
+      "origin": "http://localhost:5173",
+      "localStorage": [
+        {
+          "name": "smart_metro_admin_token",
+          "value": "mock-jwt.%7B%22userId%22%3A12%2C%22fullName%22%3A%22%D8%A3%D8%AD%D9%85%D8%AF%20%D9%85%D8%AD%D9%85%D9%88%D8%AF%22%2C%22email%22%3A%22passenger%40metro.eg%22%2C%22phone%22%3A%2201012345678%22%2C%22role%22%3A%22Passenger%22%2C%22isActive%22%3Atrue%2C%22createdAt%22%3A%222025-01-15T09%3A30%3A00Z%22%7D"
+        }
+      ]
+    }
+  ]
+}
