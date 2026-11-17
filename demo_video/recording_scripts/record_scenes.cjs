@@ -41,15 +41,25 @@ const OVERLAY_CSS = `
   }
   .ov-pill.show { opacity: 1; transform: translateY(0); }
   .ov-pill small { display: block; margin-top: 7px; font-size: 15px; font-weight: 600; color: rgba(255,255,255,.65); }
-  .ov-arrow { position: fixed; overflow: visible; opacity: 0; transition: opacity .45s ease .2s; }
+  /* ---- annotation arrows: minimal modern UI style ----
+   * White shaft over a soft dark under-stroke (contrast on any background),
+   * symmetric arrowhead oriented along the curve tangent, subtle draw-in.
+   */
+  .ov-arrow {
+    position: fixed; overflow: visible; pointer-events: none;
+    opacity: 0; transition: opacity .3s ease;
+    filter: drop-shadow(0 2px 5px rgba(0,0,0,.55));
+  }
   .ov-arrow.show { opacity: 1; }
-  .ov-arrow path { stroke: #E72434; stroke-width: 5; fill: none; stroke-linecap: round;
-    stroke-dasharray: 700; stroke-dashoffset: 700; animation: ovdraw .8s ease-out .35s forwards;
-    filter: drop-shadow(0 0 6px rgba(231,36,52,.8)); }
-  .ov-arrow polygon { fill: #E72434; opacity: 0; animation: ovhead .35s ease-out .95s forwards;
-    filter: drop-shadow(0 0 6px rgba(231,36,52,.8)); }
-  @keyframes ovdraw { to { stroke-dashoffset: 0; } }
-  @keyframes ovhead { to { opacity: 1; } }
+  .ov-arrow path { fill: none; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; }
+  .ov-arrow.show path { transition: stroke-dashoffset .45s ease-out; stroke-dashoffset: 0; }
+  .ov-arrow .shaft-under { stroke: #0A1B33; stroke-width: 10; opacity: .58; }
+  .ov-arrow .shaft { stroke: #FFFFFF; stroke-width: 4.6; }
+  .ov-arrow polygon {
+    fill: #FFFFFF; stroke: #0A1B33; stroke-width: 2.4; stroke-linejoin: round;
+    opacity: 0; transition: opacity .22s ease .34s;
+  }
+  .ov-arrow.show polygon { opacity: 1; }
 `;
 
 async function injectOverlayCSS(page) {
@@ -57,14 +67,35 @@ async function injectOverlayCSS(page) {
   return page;
 }
 
-/** caption pill at (x,y) + curved arrow from pill to element edge */
+/** Wait until an element's bounding box stops changing (layout settled).
+ *  Prevents arrows aimed at a bbox measured before the page finished laying out. */
+async function waitStableBox(page, selector, { timeout = 4000 } = {}) {
+  const loc = page.locator(selector).first();
+  const start = Date.now();
+  let prev = await loc.boundingBox();
+  while (Date.now() - start < timeout) {
+    await page.waitForTimeout(250);
+    const cur = await loc.boundingBox();
+    if (prev && cur &&
+        Math.abs(cur.x - prev.x) < 1 && Math.abs(cur.y - prev.y) < 1 &&
+        Math.abs(cur.width - prev.width) < 1 && Math.abs(cur.height - prev.height) < 1) return cur;
+    prev = cur;
+  }
+  return prev;
+}
+
+/** caption pill at (x,y) + minimal modern arrow from the pill's edge to the target edge.
+ * Geometry rules: arrow starts ON the pill boundary (nearest side), ends 8px short of
+ * the target edge (never touching/covering it), gentle adaptive curve bowing toward
+ * free space, symmetric arrowhead oriented along the curve's end tangent — fully
+ * inside the SVG bounds so it can never be clipped. */
 async function addCallout(page, { caption, sub, pill, target, direction = 'up' }) {
   const box = await page.locator(target).first().boundingBox();
   if (!box) { console.warn('callout target not found:', target); return; }
   const tx = box.x + box.width / 2;
   const ty = direction === 'up' ? box.y : box.y + box.height;
   const px = pill.x, py = pill.y;
-  await page.evaluate(({ caption, sub, px, py, tx, ty, direction }) => {
+  await page.evaluate(({ caption, sub, px, py, tx, ty }) => {
     let wrap = document.querySelector('.ov-wrap');
     if (!wrap) { wrap = document.createElement('div'); wrap.className = 'ov-wrap'; document.body.appendChild(wrap); }
     // sequential captions: clear previous pill/arrow so they never accumulate
@@ -75,22 +106,69 @@ async function addCallout(page, { caption, sub, pill, target, direction = 'up' }
     pillEl.textContent = caption;
     if (sub) { const s = document.createElement('small'); s.textContent = sub; pillEl.appendChild(s); }
     wrap.appendChild(pillEl);
+
+    // --- measure the pill, exit from the boundary side facing the target ---
+    const r = pillEl.getBoundingClientRect();
+    const pcx = r.left + r.width / 2, pcy = r.top + r.height / 2;
+    const vdx = tx - pcx, vdy = ty - pcy;
+    const vd = Math.hypot(vdx, vdy) || 1;
+    const nx = vdx / vd, ny = vdy / vd;
+    const halfW = Math.max(1, r.width / 2), halfH = Math.max(1, r.height / 2);
+    const tEdgeX = Math.abs(nx) > 1e-6 ? halfW / Math.abs(nx) : Infinity;
+    const tEdgeY = Math.abs(ny) > 1e-6 ? halfH / Math.abs(ny) : Infinity;
+    const tExit = Math.min(tEdgeX, tEdgeY);
+    const sx = pcx + nx * (tExit + 12), sy = pcy + ny * (tExit + 12);
+
+    // --- aim point: stop 8px short of the target edge ---
+    const ax = tx, ay = ty;
+    const ad = Math.hypot(ax - sx, ay - sy) || 1;
+    const ux0 = (ax - sx) / ad, uy0 = (ay - sy) / ad;
+    const S = { x: ax - ux0 * 8, y: ay - uy0 * 8 };
+
+    // --- gentle curve: bow perpendicular to the travel direction, choose the side
+    //     whose control point sits farther from the viewport center (free space) ---
+    const bow = Math.min(70, Math.max(26, ad * 0.18));
+    const candidates = [1, -1].map((sign) => ({
+      sign,
+      mx: (sx + S.x) / 2 - uy0 * bow * sign,
+      my: (sy + S.y) / 2 + ux0 * bow * sign,
+    }));
+    candidates.sort((a, b) =>
+      Math.hypot(b.mx - 960, b.my - 540) - Math.hypot(a.mx - 960, a.my - 540));
+    const C = candidates[0];
+    const Cp = { x: C.mx, y: C.my }; // normalized control point (x/y keys)
+
+    // --- arrowhead: symmetric wedge along the curve's end tangent (S - C) ---
+    const hdx = S.x - Cp.x, hdy = S.y - Cp.y;
+    const hd = Math.hypot(hdx, hdy) || 1;
+    const ux = hdx / hd, uy = hdy / hd;          // tangent at the tip
+    const pxv = -uy, pyv = ux;                    // perpendicular
+    const headLen = 18, headHalf = 8;
+    const base = { x: S.x - ux * headLen, y: S.y - uy * headLen };
+    const b1 = { x: base.x + pxv * headHalf, y: base.y + pyv * headHalf };
+    const b2 = { x: base.x - pxv * headHalf, y: base.y - pyv * headHalf };
+    // shaft ends slightly inside the head so the two connect naturally
+    const end = { x: base.x + ux * 3.5, y: base.y + uy * 3.5 };
+
+    // --- svg bounds with generous padding: nothing can ever be clipped ---
+    const pts = [S, b1, b2, { x: sx, y: sy }, Cp, end];
+    const pad = 60;
+    const x0 = Math.min(...pts.map((p) => p.x)) - pad, y0 = Math.min(...pts.map((p) => p.y)) - pad;
+    const x1 = Math.max(...pts.map((p) => p.x)) + pad, y1 = Math.max(...pts.map((p) => p.y)) + pad;
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('class', 'ov-arrow');
-    const pad = 90;
-    const x0 = Math.min(px, tx) - pad, y0 = Math.min(py, ty) - pad;
-    const x1 = Math.max(px, tx) + pad, y1 = Math.max(py, ty) + pad;
-    svg.setAttribute('width', Math.max(60, x1 - x0)); svg.setAttribute('height', Math.max(60, y1 - y0));
+    svg.setAttribute('width', Math.max(60, x1 - x0));
+    svg.setAttribute('height', Math.max(60, y1 - y0));
     svg.style.left = x0 + 'px'; svg.style.top = y0 + 'px';
-    const cx = tx - x0, cy = ty - y0, sx = px - x0, sy = py - y0;
-    const mx = (sx + cx) / 2 + (direction === 'up' ? -55 : 55);
-    const my = (sy + cy) / 2;
+    const rel = (p) => `${(p.x - x0).toFixed(1)},${(p.y - y0).toFixed(1)}`;
+    const d = `M${rel({ x: sx, y: sy })} Q${rel(Cp)} ${rel(end)}`;
     svg.innerHTML =
-      `<path d="M${sx},${sy} Q${mx},${my} ${cx},${cy}"></path>` +
-      `<polygon points="${cx},${cy} ${cx - 9},${cy - (direction === 'up' ? 16 : 2)} ${cx + 9},${cy - (direction === 'up' ? 2 : -16)}"></polygon>`;
+      `<polygon points="${[S, b1, b2].map(rel).join(' ')}"></polygon>` +
+      `<path class="shaft-under" pathLength="1" d="${d}"></path>` +
+      `<path class="shaft" pathLength="1" d="${d}"></path>`;
     wrap.appendChild(svg);
     requestAnimationFrame(() => { pillEl.classList.add('show'); svg.classList.add('show'); });
-  }, { caption, sub, px, py, tx, ty, direction });
+  }, { caption, sub, px, py, tx, ty });
 }
 
 // ---------------------------------------------------------------- helpers
@@ -204,25 +282,26 @@ async function record(browser) {
 
   // ---- Scene 4: trip planning + animated journey on the interactive map
   await scene('trip', 'user_state.json', async (page) => {
+    const tripT0 = Date.now();
     await page.goto(BASE + '/app/trip');
     await page.waitForSelector('#trip-from', { timeout: 20000 });
     await page.waitForTimeout(400);
 
-    await addCallout(page, { caption: 'ابحث عن محطتك', sub: 'بالعربية أو الإنجليزية', pill: { x: 1180, y: 30 }, target: '#trip-from', direction: 'down' });
+    await addCallout(page, { caption: 'ابحث عن محطتك', sub: 'بالعربية أو الإنجليزية', pill: { x: 640, y: 20 }, target: '#trip-from', direction: 'up' });
     await page.waitForTimeout(1700);
     await pickStation(page, 'trip-from', 'السادات', 'أنور السادات');
 
-    await addCallout(page, { caption: 'حدد نقطة الانطلاق والوجهة', pill: { x: 1180, y: 30 }, target: '#trip-to', direction: 'down' });
+    await addCallout(page, { caption: 'حدد نقطة الانطلاق والوجهة', pill: { x: 560, y: 20 }, target: '#trip-to', direction: 'up' });
     await page.waitForTimeout(900);
     await pickStation(page, 'trip-to', 'المنيب', 'المنيب');
 
     // route auto-calculates → interactive map appears and auto-plays
     await page.waitForSelector('svg[aria-label="خريطة مترو القاهرة التفاعلية"]', { timeout: 20000 });
-    await page.waitForTimeout(800);
+    await waitStableBox(page, 'svg[aria-label="خريطة مترو القاهرة التفاعلية"]'); // layout must settle before aiming at the map
     await addCallout(page, { caption: 'اكتشف المسار المناسب', sub: 'رسم متحرك للرحلة على الخريطة', pill: { x: 560, y: 30 }, target: 'svg[aria-label="خريطة مترو القاهرة التفاعلية"]', direction: 'up' });
     await page.waitForTimeout(4300); // watch the moving train
     await addCallout(page, { caption: 'خطط رحلتك بسهولة', pill: { x: 560, y: 30 }, target: 'svg[aria-label="خريطة مترو القاهرة التفاعلية"]', direction: 'up' });
-    await page.waitForTimeout(Math.max(0, DUR.trip * 1000 - 400 - 1700 - 900 - 800 - 4300 - 2400));
+    await page.waitForTimeout(Math.max(0, DUR.trip * 1000 - (Date.now() - tripT0)));
   });
 
   // ---- Scene 5: summary + controls + real logout + real register success
@@ -233,12 +312,13 @@ async function record(browser) {
     await pickStation(page, 'trip-from', 'السادات', 'أنور السادات');
     await pickStation(page, 'trip-to', 'المنيب', 'المنيب');
     await page.waitForSelector('svg[aria-label="خريطة مترو القاهرة التفاعلية"]', { timeout: 20000 });
+    await waitStableBox(page, 'svg[aria-label="خريطة مترو القاهرة التفاعلية"]');
 
     const nextBtn = page.locator('button[aria-label="المحطة التالية"]');
     if (await nextBtn.count() && (await nextBtn.isEnabled())) { await nextBtn.click().catch(() => {}); await page.waitForTimeout(300); await nextBtn.click().catch(() => {}); }
     await addCallout(page, { caption: 'تفاصيل الرحلة والتذكرة', sub: 'الزمن · المحطات · سعر التذكرة', pill: { x: 560, y: 30 }, target: 'svg[aria-label="خريطة مترو القاهرة التفاعلية"]', direction: 'up' });
     await page.waitForTimeout(1800);
-    await addCallout(page, { caption: 'محاكاة حية لرحلتك', sub: 'تشغيل · إيقاف · سرعة · محطة تلو أخرى', pill: { x: 1150, y: 820 }, target: 'button[aria-label="المحطة التالية"], button[aria-label="تشغيل الرحلة"]', direction: 'up' });
+    await addCallout(page, { caption: 'محاكاة حية لرحلتك', sub: 'تشغيل · إيقاف · سرعة · محطة تلو أخرى', pill: { x: 1010, y: 790 }, target: 'button[aria-label="المحطة التالية"], button[aria-label="تشغيل الرحلة"]', direction: 'up' });
     await page.waitForTimeout(1600);
 
     // real logout on camera (pick the visible button — sidebar on desktop)
@@ -259,28 +339,32 @@ async function record(browser) {
     try {
       await page.waitForSelector('text=تم إنشاء حسابك بنجاح', { timeout: 12000 });
     } catch { /* truthful failure state is captured as-is */ }
-    await addCallout(page, { caption: 'تسجيل فوري وآمن', pill: { x: 640, y: 26 }, target: 'h1:has-text("تم إنشاء حسابك بنجاح")', direction: 'down' }).catch(() => {});
+    await addCallout(page, { caption: 'تسجيل فوري وآمن', pill: { x: 640, y: 26 }, target: 'h1:has-text("تم إنشاء حسابك بنجاح")', direction: 'up' }).catch(() => {});
     await page.waitForTimeout(Math.max(0, DUR.services * 1000 - 350 - 1800 - 1600 - 2400));
   });
 
   // ---- Scene 6: real admin login + real admin shell
   await scene('admin', null, async (page) => {
+    const adminT0 = Date.now();
     await page.goto(BASE + '/login');
     await page.waitForSelector('form');
     const inputs = page.locator('form input');
     await inputs.nth(0).click();
-    await inputs.nth(0).pressSequentially(ADMIN.email, { delay: 45 });
-    await page.waitForTimeout(300);
+    await inputs.nth(0).pressSequentially(ADMIN.email, { delay: 38 });
+    await page.waitForTimeout(250);
     await inputs.nth(1).click();
-    await inputs.nth(1).pressSequentially(ADMIN.pass, { delay: 55 });
-    await page.waitForTimeout(400);
+    await inputs.nth(1).pressSequentially(ADMIN.pass, { delay: 45 });
+    await page.waitForTimeout(350);
     await page.locator('form button[type=submit]').click();
     await page.waitForURL('**/dashboard', { timeout: 20000 });
     await page.waitForSelector('aside');
-    await addCallout(page, { caption: 'لوحة تحكم المسؤول', pill: { x: 1380, y: 30 }, target: 'aside nav a >> nth=0', direction: 'down' });
-    await page.waitForTimeout(2500);
-    await addCallout(page, { caption: 'إدارة ومتابعة النظام', pill: { x: 1380, y: 30 }, target: 'aside nav a >> nth=8', direction: 'down' });
-    await page.waitForTimeout(Math.max(0, DUR.admin * 1000 - 3500 - 2500 - 2400));
+    // pill left of the page heading so nothing is covered; arrow arcs above the
+    // heading (inside the logo→link gap) and points at the first sidebar link's top edge
+    await addCallout(page, { caption: 'لوحة تحكم المسؤول', pill: { x: 950, y: 20 }, target: 'aside nav a >> nth=0', direction: 'up' });
+    await page.waitForTimeout(2000);
+    // pill below the last sidebar link (empty sidebar area), arrow points up at its bottom edge
+    await addCallout(page, { caption: 'إدارة ومتابعة النظام', pill: { x: 1640, y: 700 }, target: 'aside nav a >> nth=8', direction: 'down' });
+    await page.waitForTimeout(Math.max(0, DUR.admin * 1000 - (Date.now() - adminT0)));
   });
 
   // ---- Scene 7: future features (honest stub pages)

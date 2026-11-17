@@ -3,3 +3,4 @@ tmp/
 
 # Superseded QC frames from older builds (kept locally only)
 screenshots/archive/
+raw_v3_backup/

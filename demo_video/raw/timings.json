@@ -1,7 +1,7 @@
 {
   "intro": {
     "dur": 5.4,
-    "loadMs": 458
+    "loadMs": 426
   },
   "home": {
     "dur": 7.4,
@@ -9,26 +9,26 @@
   },
   "login": {
     "dur": 8.4,
-    "loadMs": 2234
+    "loadMs": 1839
   },
   "trip": {
     "dur": 15.4,
-    "loadMs": 3542
+    "loadMs": 5
   },
   "services": {
     "dur": 11,
-    "loadMs": 7352
+    "loadMs": 7612
   },
   "admin": {
     "dur": 8.4,
-    "loadMs": 696
+    "loadMs": 16
   },
   "future": {
     "dur": 4.4,
-    "loadMs": 1086
+    "loadMs": 991
   },
   "closing": {
     "dur": 2.4,
-    "loadMs": 443
+    "loadMs": 414
   }
 }
