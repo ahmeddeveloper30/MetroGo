@@ -24,8 +24,11 @@ const USER = { email: 'passenger@metro.eg', pass: 'Metro1234' };
 const ADMIN = { email: 'admin@metro.eg', pass: 'Admin1234' };
 const DEMO_REG = { name: 'مستخدم تجريبي', email: 'demo.video@metro.eg', phone: '01000000000', pass: 'Demo1234' };
 
-/** scene -> seconds ON SCREEN (final video length; load/setup time is trimmed in editing) */
-const DUR = { intro: 5.4, home: 7.4, login: 8.4, trip: 15.4, services: 11.0, admin: 8.4, future: 4.4, closing: 2.4 };
+/** scene -> seconds ON SCREEN (final video length; load/setup time is trimmed in editing)
+ *  v8: the Trip Planning scene is expanded to 24.4s (map zoom + journey details +
+ *  full itinerary + transfer demo); the other scenes keep identical content with
+ *  slightly shorter hold times so the final cut stays at exactly 60s. */
+const DUR = { intro: 3.6, home: 5.6, login: 6.6, trip: 24.4, services: 11.0, admin: 6.8, future: 2.8, closing: 2.0 };
 
 fs.mkdirSync(RAW, { recursive: true });
 
@@ -84,13 +87,57 @@ async function waitStableBox(page, selector, { timeout = 4000 } = {}) {
   return prev;
 }
 
+/** Pan the interactive metro map with real pointer drags so that user-space point
+ *  (ux,uy) sits at the canvas center. Reads the live translate/scale transform,
+ *  then performs one horizontal + one vertical drag (drag anchors ax/ay/bx/by are
+ *  chosen to stay inside the canvas and away from station hover targets). */
+async function panMapTo(page, sel, { ux, uy, ax, ay, bx, by }) {
+  const rect = await page.locator(sel).first().boundingBox();
+  const tr = await page.locator(`${sel} > g[transform]`).first().getAttribute('transform');
+  const m = /translate\(([-\d.eE]+)\s+([-\d.eE]+)\)\s+scale\(([-\d.eE]+)\)/.exec(tr ?? '');
+  if (!rect || !m) return;
+  const tx = +m[1], ty = +m[2], k = +m[3];
+  const dx = (500 - k * ux - tx) * rect.width / 1000;  // Δpx = Δuser·(w/1000)
+  const dy = (700 - k * uy - ty) * rect.height / 1400; // Δpx = Δuser·(h/1400)
+  const drag = async (sx, sy, ddx, ddy) => {
+    await page.mouse.move(sx, sy);
+    await page.mouse.down();
+    await page.mouse.move(sx + ddx, sy + ddy, { steps: 16 });
+    await page.mouse.up();
+    await page.waitForTimeout(120);
+  };
+  if (Math.abs(dx) > 1) await drag(ax, ay, dx, 0);
+  if (Math.abs(dy) > 1) await drag(bx, by, 0, dy);
+}
+
+/** Screen (page) coordinates of an SVG user-space point under the interactive
+ *  map's live transform. Uses the transform ATTRIBUTE (CSS animations such as
+ *  the pulsing walk badge can temporarily override the visual transform, so
+ *  never target animated map elements with a selector — compute instead). */
+async function mapUserToScreen(page, sel, ux, uy) {
+  const rect = await page.locator(sel).first().boundingBox();
+  const tr = await page.locator(`${sel} > g[transform]`).first().getAttribute('transform');
+  const m = /translate\(([-\d.eE]+)\s+([-\d.eE]+)\)\s+scale\(([-\d.eE]+)\)/.exec(tr ?? '');
+  if (!rect || !m) return null;
+  const tx = +m[1], ty = +m[2], k = +m[3];
+  const s = Math.min(rect.width / 1000, rect.height / 1400);
+  const offX = (rect.width - 1000 * s) / 2, offY = (rect.height - 1400 * s) / 2;
+  return {
+    x: rect.x + offX + (k * ux + tx) * s,
+    y: rect.y + offY + (k * uy + ty) * s,
+  };
+}
+
 /** caption pill at (x,y) + minimal modern arrow from the pill's edge to the target edge.
  * Geometry rules: arrow starts ON the pill boundary (nearest side), ends 8px short of
  * the target edge (never touching/covering it), gentle adaptive curve bowing toward
  * free space, symmetric arrowhead oriented along the curve's end tangent — fully
  * inside the SVG bounds so it can never be clipped. */
-async function addCallout(page, { caption, sub, pill, target, direction = 'up' }) {
-  const box = await page.locator(target).first().boundingBox();
+async function addCallout(page, { caption, sub, pill, target, point, direction = 'up' }) {
+  // target: selector → bbox center; or an explicit page point (point: {x, y})
+  const box = point
+    ? { x: point.x, y: point.y, width: 0, height: 0 }
+    : await page.locator(target).first().boundingBox();
   if (!box) { console.warn('callout target not found:', target); return; }
   const tx = box.x + box.width / 2;
   const ty = direction === 'up' ? box.y : box.y + box.height;
@@ -254,13 +301,13 @@ async function record(browser) {
     await page.waitForSelector('main');
     await page.waitForTimeout(400);
     await addCallout(page, { caption: 'واجهة ذكية وسهلة الاستخدام', pill: { x: 640, y: 26 }, target: 'main form input >> nth=0', direction: 'down' });
-    await page.waitForTimeout(2200);
+    await page.waitForTimeout(1800);
     await page.mouse.wheel(0, 280);
     await page.waitForTimeout(800);
     await page.mouse.wheel(0, -280);
     await page.waitForTimeout(500);
     await addCallout(page, { caption: 'خدمات مترو القاهرة في مكان واحد', pill: { x: 640, y: 26 }, target: 'main .grid >> nth=1', direction: 'down' });
-    await page.waitForTimeout(Math.max(0, DUR.home * 1000 - 400 - 2200 - 800 - 500 - 2400));
+    await page.waitForTimeout(Math.max(0, DUR.home * 1000 - 400 - 1800 - 800 - 500 - 1900));
   });
 
   // ---- Scene 3: real user login (password masked)
@@ -280,27 +327,106 @@ async function record(browser) {
     await page.waitForTimeout(Math.max(0, DUR.login * 1000 - 3500));
   });
 
-  // ---- Scene 4: trip planning + animated journey on the interactive map
+  // ---- Scene 4: trip planning — zoomed map, journey details, full itinerary + transfer
+  // Route demonstrated (genuine app data): كوبري القبة (الخط الأول) → فيصل (الخط الثاني)
+  // with a transfer at أنور السادات — ١٢ محطة، ٢٩ دقيقة، تبديل واحد.
   await scene('trip', 'user_state.json', async (page) => {
-    const tripT0 = Date.now();
     await page.goto(BASE + '/app/trip');
     await page.waitForSelector('#trip-from', { timeout: 20000 });
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(350);
+    // content timer starts AFTER the page settles — goto/load time is
+    // front-of-video setup, which the build trims via timings.loadMs
+    const tripT0 = Date.now();
 
     await addCallout(page, { caption: 'ابحث عن محطتك', sub: 'بالعربية أو الإنجليزية', pill: { x: 640, y: 20 }, target: '#trip-from', direction: 'up' });
-    await page.waitForTimeout(1700);
-    await pickStation(page, 'trip-from', 'السادات', 'أنور السادات');
+    await page.waitForTimeout(1000);
+    await pickStation(page, 'trip-from', 'كوبري القبة', 'كوبري القبة');
 
-    await addCallout(page, { caption: 'حدد نقطة الانطلاق والوجهة', pill: { x: 560, y: 20 }, target: '#trip-to', direction: 'up' });
+    await addCallout(page, { caption: 'حدد محطة الوصول', pill: { x: 560, y: 20 }, target: '#trip-to', direction: 'up' });
+    await page.waitForTimeout(800);
+    await pickStation(page, 'trip-to', 'فيصل', 'فيصل');
+
+    // route auto-calculates → interactive map appears and auto-plays (×1)
+    const mapSel = 'svg[aria-label="خريطة مترو القاهرة التفاعلية"]';
+    await page.waitForSelector(mapSel, { timeout: 20000 });
+    await waitStableBox(page, mapSel); // layout must settle before zooming/aiming
+
+    // bump playback to ×2 so the full 12-hop journey fits the scene — keep it
+    // running through the zoom so the route keeps drawing while we move
+    await page.locator('button:has-text("سرعة")').first().click();
+
+    // ---- zoom into the map (5 × تكبير → scale cap 3)...
+    const zoomBtn = page.locator('button[aria-label="تكبير"]');
+    for (let i = 0; i < 5; i++) { await zoomBtn.click().catch(() => {}); await page.waitForTimeout(200); }
+    // freeze playback well below the interchange hop (≈ ٣-٤ / ١٢) so the pan
+    // and the step-to-transfer below can never overshoot أنور السادات
+    await page.locator('button[aria-label="إيقاف مؤقت"]').click();
+    // ...then pan so the whole route (bbox center ≈ user 367,557) sits centered
+    await panMapTo(page, mapSel, { ux: 367, uy: 557, ax: 1470, ay: 711, bx: 697, by: 859 });
+
+    await addCallout(page, { caption: 'مسارك مرسوم بالألوان على الخريطة', sub: 'من كوبري القبة إلى فيصل', pill: { x: 560, y: 30 }, target: mapSel, direction: 'up' });
+    await page.waitForTimeout(500);
+
+    // ---- step the journey forward while the callout is up, exactly onto the
+    // interchange hop ٧ (أنور السادات). The first click snaps the paused
+    // progress to an exact integer (counter then reads the true hop), then we
+    // step one hop at a time. If we ever land past hop ٧, restart and step up
+    // from the beginning — always ends paused exactly at the interchange.
+    const counter = page.locator('span:has-text("محطة")').first();
+    const nextBtn = page.locator('button[aria-label="المحطة التالية"]');
+    const counterText = async () => String(await counter.textContent().catch(() => ''));
+    const stepTo7 = async () => {
+      for (let i = 0; i < 10; i++) {
+        if ((await counterText()).includes('٧ / ١٢')) return true;
+        if (!(await nextBtn.isEnabled().catch(() => false))) return false;
+        await nextBtn.click();
+        await page.waitForTimeout(160);
+      }
+      return false;
+    };
+    await nextBtn.click(); // → exact integer hop
+    await page.waitForTimeout(160);
+    if (!(await stepTo7())) { // overshot past the interchange — restart cleanly
+      await page.locator('button[aria-label="إعادة تشغيل"]').click();
+      await page.waitForTimeout(150);
+      await page.locator('button[aria-label="إيقاف مؤقت"]').click();
+      await nextBtn.click();
+      await page.waitForTimeout(160);
+      await stepTo7();
+    }
     await page.waitForTimeout(900);
-    await pickStation(page, 'trip-to', 'المنيب', 'المنيب');
 
-    // route auto-calculates → interactive map appears and auto-plays
-    await page.waitForSelector('svg[aria-label="خريطة مترو القاهرة التفاعلية"]', { timeout: 20000 });
-    await waitStableBox(page, 'svg[aria-label="خريطة مترو القاهرة التفاعلية"]'); // layout must settle before aiming at the map
-    await addCallout(page, { caption: 'اكتشف المسار المناسب', sub: 'رسم متحرك للرحلة على الخريطة', pill: { x: 560, y: 30 }, target: 'svg[aria-label="خريطة مترو القاهرة التفاعلية"]', direction: 'up' });
-    await page.waitForTimeout(4300); // watch the moving train
-    await addCallout(page, { caption: 'خطط رحلتك بسهولة', pill: { x: 560, y: 30 }, target: 'svg[aria-label="خريطة مترو القاهرة التفاعلية"]', direction: 'up' });
+    // ---- transfer demonstration: aim the callout at the app's own walk badge
+    // on أنور السادات. The badge's CSS bounce animation corrupts selector
+    // bounding boxes, so compute its base position from the transform attribute.
+    const walkUser = await page.evaluate((sel) => {
+      const g = document.querySelector(`${sel} .rp-walk`);
+      const m = /translate\(([-\d.eE]+)\s+([-\d.eE]+)\)/.exec(g?.getAttribute('transform') ?? '');
+      return m ? { x: +m[1], y: +m[2] } : null;
+    }, mapSel);
+    let walkPoint = walkUser ? await mapUserToScreen(page, mapSel, walkUser.x, walkUser.y) : null;
+    if (walkPoint) walkPoint = { x: walkPoint.x, y: walkPoint.y + 12 }; // badge hangs below its origin
+    await addCallout(page, {
+      caption: 'التبديل في أنور السادات', sub: 'انزل من الخط الأول واركب الثاني',
+      pill: { x: 350, y: 620 }, point: walkPoint, direction: 'up',
+    });
+    await page.waitForTimeout(2000);
+
+    // resume — الخط الثاني keeps drawing toward the destination («وصلت!»)
+    await page.locator('button[aria-label="تشغيل الرحلة"]').click();
+
+    // ---- scroll to the summary + full station-by-station itinerary
+    await page.mouse.move(960, 1035); // off the svg so wheel scrolls, not zooms
+    for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, 180); await page.waitForTimeout(120); }
+    await page.locator('button:has-text("تفاصيل المسار خطوة بخطوة")').click();
+    await page.waitForTimeout(450);
+    const accordions = page.locator('button:has-text("ركب")');
+    const nAcc = await accordions.count();
+    for (let i = 0; i < Math.min(nAcc, 2); i++) { await accordions.nth(i).click(); await page.waitForTimeout(280); }
+
+    await addCallout(page, { caption: 'ملخص رحلتك', sub: '٢٩ دقيقة · ١٢ محطة · تبديل واحد', pill: { x: 1200, y: 315 }, target: 'text=الزمن التقديري للرحلة', direction: 'up' });
+    await page.waitForTimeout(950);
+    await addCallout(page, { caption: 'انتقال سريع بين الخطوط', pill: { x: 760, y: 930 }, target: 'p:has-text("انتقل إلى")', direction: 'up' });
     await page.waitForTimeout(Math.max(0, DUR.trip * 1000 - (Date.now() - tripT0)));
   });
 
@@ -361,7 +487,7 @@ async function record(browser) {
     // pill left of the page heading so nothing is covered; arrow arcs above the
     // heading (inside the logo→link gap) and points at the first sidebar link's top edge
     await addCallout(page, { caption: 'لوحة تحكم المسؤول', pill: { x: 950, y: 20 }, target: 'aside nav a >> nth=0', direction: 'up' });
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(1100);
     // pill below the last sidebar link (empty sidebar area), arrow points up at its bottom edge
     await addCallout(page, { caption: 'إدارة ومتابعة النظام', pill: { x: 1640, y: 700 }, target: 'aside nav a >> nth=8', direction: 'down' });
     await page.waitForTimeout(Math.max(0, DUR.admin * 1000 - (Date.now() - adminT0)));
@@ -387,7 +513,7 @@ async function record(browser) {
       wrap.appendChild(small);
       requestAnimationFrame(() => { big.classList.add('show'); small.classList.add('show'); });
     });
-    await page.waitForTimeout(1800);
+    await page.waitForTimeout(1300);
     await page.goto(BASE + '/ai');
     await page.waitForSelector('main');
     await page.evaluate(() => {

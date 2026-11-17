@@ -1,34 +1,34 @@
 {
   "intro": {
-    "dur": 5.4,
-    "loadMs": 426
+    "dur": 3.6,
+    "loadMs": 1340
   },
   "home": {
-    "dur": 7.4,
-    "loadMs": 0
+    "dur": 5.6,
+    "loadMs": 1421
   },
   "login": {
-    "dur": 8.4,
-    "loadMs": 1839
+    "dur": 6.6,
+    "loadMs": 2902
   },
   "trip": {
-    "dur": 15.4,
-    "loadMs": 5
+    "dur": 24.4,
+    "loadMs": 2662
   },
   "services": {
     "dur": 11,
-    "loadMs": 7612
+    "loadMs": 9279
   },
   "admin": {
-    "dur": 8.4,
-    "loadMs": 16
+    "dur": 6.8,
+    "loadMs": 15
   },
   "future": {
-    "dur": 4.4,
-    "loadMs": 991
+    "dur": 2.8,
+    "loadMs": 2146
   },
   "closing": {
-    "dur": 2.4,
-    "loadMs": 414
+    "dur": 2,
+    "loadMs": 449
   }
 }
