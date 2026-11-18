@@ -1,0 +1,150 @@
+{
+  "results": [
+    {
+      "name": "map appears after route calc",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "auto-play on route calc",
+      "ok": true,
+      "detail": "counter ٢ / ٩ محطة"
+    },
+    {
+      "name": "pause works",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "counter frozen while paused",
+      "ok": true,
+      "detail": "2 -> 2"
+    },
+    {
+      "name": "next-station advances +1 per click",
+      "ok": true,
+      "detail": "2 -> 4"
+    },
+    {
+      "name": "speed cycles ×1→×2→×4→×0.5→×1",
+      "ok": true,
+      "detail": "سرعة ×١ | سرعة ×٢ | سرعة ×٤ | سرعة ×٠٫٥ | سرعة ×١"
+    },
+    {
+      "name": "restart resets progress and resumes",
+      "ok": true,
+      "detail": "counter ٠ / ٩ محطة"
+    },
+    {
+      "name": "full playback completes (وصلت! 🎉)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "info panel switches to done state",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "next-station disabled at destination",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "play after done restarts journey",
+      "ok": true,
+      "detail": "counter ٢ / ٩ محطة"
+    },
+    {
+      "name": "zoom-in changes view transform",
+      "ok": true,
+      "detail": "translate(0 0) scale(1) -> translate(-125 -175) scale(1.25)"
+    },
+    {
+      "name": "zoom-out changes view transform",
+      "ok": true,
+      "detail": "translate(-125 -175) scale(1.25) -> translate(0 0) scale(1)"
+    },
+    {
+      "name": "wheel zoom-in works (non-passive listener)",
+      "ok": true,
+      "detail": "translate(0 0) scale(1) -> translate(-60 -84.00000000000011) scale(1.12)"
+    },
+    {
+      "name": "reset view restores default transform",
+      "ok": true,
+      "detail": "translate(0 0) scale(1)"
+    },
+    {
+      "name": "drag pan changes view transform",
+      "ok": true,
+      "detail": "translate(0 0) scale(1) -> translate(-101.01010101010101 225) scale(1)"
+    },
+    {
+      "name": "hover tooltip appears on station",
+      "ok": true,
+      "detail": "1 tooltip box(es)"
+    },
+    {
+      "name": "transfer route reports تبديل",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "dashed transfer connector drawn",
+      "ok": true,
+      "detail": "1 connector(s)"
+    },
+    {
+      "name": "walk badge appears at interchange during playback",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "transfer connector highlights when reached",
+      "ok": true,
+      "detail": "1 highlighted connector(s)"
+    },
+    {
+      "name": "same-station shows alert, no route",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "no console/page errors (desktop session)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "responsive 1280×800: map + controls render",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "responsive 1280×800: no horizontal overflow",
+      "ok": true,
+      "detail": "overflow=0px"
+    },
+    {
+      "name": "responsive 768×1024: map + controls render",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "responsive 768×1024: no horizontal overflow",
+      "ok": true,
+      "detail": "overflow=0px"
+    },
+    {
+      "name": "responsive 390×844: map + controls render",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "responsive 390×844: no horizontal overflow",
+      "ok": true,
+      "detail": "overflow=0px"
+    }
+  ],
+  "errors": []
+}
