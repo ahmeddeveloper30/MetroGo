@@ -20,6 +20,9 @@ const FADE = 0.4;
 const DUR = { intro: 5.4, home: 7.4, login: 8.4, trip: 15.4, services: 11.0, admin: 8.4, future: 4.4, closing: 2.4 };
 const SCENES = Object.keys(DUR);
 const HAS_FADE = { intro: false, home: true, login: true, trip: true, services: true, admin: true, future: true, closing: true };
+/** per-scene push-in amount (fraction of frame) — keep tiny on UI scenes so text stays crisp */
+const ZOOM = { intro: 0.05, home: 0.03, login: 0.03, trip: 0.03, services: 0.03, admin: 0.03, future: 0.04, closing: 0.05 };
+const AUDIO = path.join(DIR, 'tmp', 'audio_mix.wav');
 
 fs.mkdirSync(TMP, { recursive: true });
 
@@ -65,6 +68,24 @@ for (const name of SCENES) {
     fs.rmSync(out); fs.renameSync(fixed, out);
     actual = probeDur(out);
   }
+
+  // 2b — subtle camera push-in so each frame feels alive (resets at each cut).
+  // UI scenes anchor bottom-right so the sidebar text and bottom controls never
+  // get clipped; full-bleed logo cards zoom from the center.
+  const zAmp = ZOOM[name] ?? 0.03;
+  const frames = Math.max(2, Math.round(dur * 30));
+  const center = name === 'intro' || name === 'closing';
+  const pos = center
+    ? `x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2'`
+    : `x='iw-iw/zoom':y='0'`;
+  const moved = path.join(TMP, `${name}_mv.mp4`);
+  ff([
+    '-i', out,
+    '-vf', `scale=3840:2160:flags=lanczos,zoompan=z='min(1+${zAmp}*on/${frames},${(1 + zAmp).toFixed(4)})':${pos}:d=1:s=1920x1080:fps=30,setsar=1`,
+    '-pix_fmt', 'yuv420p', '-an', '-c:v', 'libx264', '-preset', 'medium', '-crf', '18',
+    moved,
+  ], `motion ${name} (+${(zAmp * 100).toFixed(1)}%, ${center ? 'center' : 'top-right'})`);
+  fs.rmSync(out); fs.renameSync(moved, out);
   parts.push({ name, dur: probeDur(out), file: out });
 }
 
@@ -89,12 +110,12 @@ console.log(`total after crossfades: ${totalDur.toFixed(2)}s (target 60.0s)`);
 
 ff([
   ...inputs,
-  '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
+  ...(fs.existsSync(AUDIO) ? ['-i', AUDIO] : ['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo']),
   '-filter_complex', filter,
   '-map', '[vout]',
   '-map', `${parts.length}:a`,
-  '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-r', '30',
-  '-c:a', 'aac', '-b:a', '96k', '-shortest',
+  '-c:v', 'libx264', '-preset', 'slow', '-crf', '29', '-r', '30',
+  '-c:a', 'aac', '-b:a', '80k', '-ar', '48000', '-shortest',
   '-movflags', '+faststart',
   OUT,
 ], `final MP4 → ${OUT}`);
